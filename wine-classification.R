@@ -165,9 +165,30 @@ results_nnet <- train(good ~., data = wine_train, method = "nnet",
                       trace = FALSE,   # switch for tracing optimization. Default TRUE
                       maxit = 1000)    # maximum number of iterations. Default 100
 
-results_nnet # 75.89%
+results_nnet
 
 # predict with the Neural Networks classifier
-preds_nnet <- predict(results_nnet, wine_test[, -10])
+preds_nnet <- predict(results_nnet, newdata = wine_test[, -10], type = "raw")
 confusionMatrix(preds_nnet, wine_test[, 10], positive = "Good")
 # The Neural Networks classifier performs slightly better than the KNN classifier, but nothing special
+
+
+# Model Averaged Neural Network -------------------------------------------
+
+# The avNNet method in the caret package train several neural networks classifiers,
+# aggregate them and average them. It is an ensemble method.
+
+results_avgNnet = train(good ~., data = wine_train, method = "avNNet",
+                        preProcess = "range",  # normalization
+                        trControl = cv_opts,   # cross validation
+                        tuneGrid = expand.grid(.size = c(1, 5, 10), .decay = c(0, 0.001, 0.1), .bag = FALSE),
+                        tuneLength = 5,
+                        allowParallel = TRUE,  # use parallel processing if loaded and available (DoSNOW)
+                        trace = FALSE,
+                        maxit = 1000)
+results_avgNnet # 77.58%
+
+# predict with the Model Averaged Neural Networks classifier
+preds_avgNnet <- predict(results_avgNnet, newdata = wine_test[, -10])
+confusionMatrix(preds_avgNnet, wine_test[, 10], positive = "Good")
+# The Model Averaged Neural Networks classifier performs slightly better than the single Neural Networks
