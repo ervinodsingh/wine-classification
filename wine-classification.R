@@ -11,7 +11,7 @@ library(doSNOW)    # parallel processing (in order to allow caret to allot tasks
 library(corrplot)  # graphical display of the correlation matrix
 library(caret)     # classification and regression training
 library(e1071)
-library(randomForest)
+library(randomForest)  # for recursive feature elimination
 
 
 # setup parallel processing on 3 cores ------------------------------------
@@ -80,6 +80,18 @@ wanted = !colnames(wine) %in% c("free.sulfur.dioxide", "density", "quality", "co
 wine_train = wine[trainIndices, wanted]
 wine_test = wine[-trainIndices, wanted]
 
+
+# Training Set Normalization ----------------------------------------------
+
+# Normalize the continuous variables to the [0,1] range
+normalized_wine_train <- preProcess(wine_train[,-10], method="range")
+wine_trainplot = predict(normalized_wine_train, wine_train[,-10])
+# Let’s take an initial peek at how the predictors separate on the target
+featurePlot(wine_trainplot, wine_train$good, "box")
+
+# For the training set, it looks like alcohol content, volatile acidity and chlorides separate most
+# with regard to good classification. While this might give us some food for thought, note that
+# the figure does not give insight into interaction effects, which methods such as trees will get at.
 
 
 
