@@ -18,6 +18,7 @@ library(randomForest)  # Random Forest, also for recursive feature elimination
 library(pROC)
 library(nnet)      # Neural Networks (nnet and avNNet)
 library(kernlab)   # Support Vector Machines
+library(klaR)
 
 
 # setup parallel processing on 3 cores ------------------------------------
@@ -253,7 +254,15 @@ confusionMatrix(preds_svmRBF, wine_test[, 10], positive = "Good")
 # Neither the SVM-RBF classifier performs particularly well
 
 
+# Naive Bayes classifer ---------------------------------------------------
 
+set.seed(1234)
+results_nb <- train(good ~., data = wine_train, method = "nb",
+                    preProcess = "range",  # normalization
+                    trControl = cv_opts)   # cross validation
+results_nb
 
-
+# predict with the Naive Bayes classifier
+preds_nb <- predict(results_nb, wine_test[, -10])
+confusionMatrix(preds_nb, wine_test[, 10], positive = "Good")
 
