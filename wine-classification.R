@@ -160,7 +160,8 @@ results_nnet <- train(good ~., data = wine_train, method = "nnet",
                       # be very time consuming. We could find the best set of:
                       # .size = number of units in the hidden layer
                       # .decay = weight decay of the neural network (regularization parameter)
-                      tuneGrid = expand.grid(.size = c(1, 5, 10), .decay = c(0, 0.001, 0.1)),
+                      tuneGrid = expand.grid(.size = c(1, 5, 10),
+                                             .decay = c(0, 0.001, 0.1)),
                       tuneLength = 5,  # number of levels for each tuning parameters
                       trace = FALSE,   # switch for tracing optimization. Default TRUE
                       maxit = 1000)    # maximum number of iterations. Default 100
@@ -178,17 +179,37 @@ confusionMatrix(preds_nnet, wine_test[, 10], positive = "Good")
 # The avNNet method in the caret package train several neural networks classifiers,
 # aggregate them and average them. It is an ensemble method.
 
-results_avgNnet = train(good ~., data = wine_train, method = "avNNet",
-                        preProcess = "range",  # normalization
-                        trControl = cv_opts,   # cross validation
-                        tuneGrid = expand.grid(.size = c(1, 5, 10), .decay = c(0, 0.001, 0.1), .bag = FALSE),
-                        tuneLength = 5,
-                        allowParallel = TRUE,  # use parallel processing if loaded and available (DoSNOW)
-                        trace = FALSE,
-                        maxit = 1000)
-results_avgNnet # 77.58%
+results_avgNnet <- train(good ~., data = wine_train, method = "avNNet",
+                         preProcess = "range",  # normalization
+                         trControl = cv_opts,   # cross validation
+                         tuneGrid = expand.grid(.size = c(1, 5, 10),
+                                                .decay = c(0, 0.001, 0.1),
+                                                .bag = FALSE),
+                         tuneLength = 5,
+                         allowParallel = TRUE,  # use parallel processing if loaded and available (DoSNOW)
+                         trace = FALSE,
+                         maxit = 1000)
+results_avgNnet 
 
 # predict with the Model Averaged Neural Networks classifier
 preds_avgNnet <- predict(results_avgNnet, newdata = wine_test[, -10])
 confusionMatrix(preds_avgNnet, wine_test[, 10], positive = "Good")
 # The Model Averaged Neural Networks classifier performs slightly better than the single Neural Networks
+
+
+# Random Forest classifier ----------------------------------------------
+
+set.seed(1234)
+# The only tunable parameter in a randomForest classifier is mtry
+# mtry = Number of variables randomly sampled as candidates at each split
+results_rf <- train(good ~., data = wine_train, method = "rf",
+                    preProcess = "range",  # normalization
+                    trControl = cv_opts,   # cross validation
+                    tuneGrid = expand.grid(.mtry = c(2:6)),
+                    n.tree = 1000)
+# NEVER prune trees in a Random Forests classifier! (from a talk by Jeremy Howard)
+results_rf 
+
+# predict with the Model Averaged Neural Networks classifier
+preds_rf <- predict(results_rf, wine_test[, -10])
+confusionMatrix(preds_rf, wine_test[, 10], positive="Good")
