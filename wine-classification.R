@@ -14,9 +14,10 @@ library(doSNOW)    # parallel processing (in order to allow caret to allot tasks
 library(corrplot)  # graphical display of the correlation matrix
 library(caret)     # classification and regression training
 library(e1071)
-library(randomForest)  # for recursive feature elimination
+library(randomForest)  # Random Forest, also for recursive feature elimination
 library(pROC)
-library(nnet)
+library(nnet)      # Neural Networks (nnet and avNNet)
+library(kernlab)   # Support Vector Machines
 
 
 # setup parallel processing on 3 cores ------------------------------------
@@ -210,6 +211,31 @@ results_rf <- train(good ~., data = wine_train, method = "rf",
 # NEVER prune trees in a Random Forests classifier! (from a talk by Jeremy Howard)
 results_rf 
 
-# predict with the Model Averaged Neural Networks classifier
+# predict with the Random Forest classifier
 preds_rf <- predict(results_rf, wine_test[, -10])
 confusionMatrix(preds_rf, wine_test[, 10], positive="Good")
+# The Random Forest classifier performs quite better than the Model Averaged Neural Networks,
+# and it is significantly faster to train.
+# Random forest classifier does not suffer of irrelevant and/or correlated predictors, and since it is an
+# ensemble method, it contains the combined information of many models, so it is lesser prone to overfitting.
+
+
+# Support Vector Machines (SVM) classifier --------------------------------
+
+set.seed(1234)
+results_svm <- train(good ~., data = wine_train, method = "svmLinear",
+                    preProcess = "range",  # normalization
+                    trControl = cv_opts,   # cross validation
+                    tuneGrid = expand.grid(.C = c(0.001, 0.01, 0.1, 1, 10, 100, 1000)),
+                    tuneLength = 5)
+results_svm
+
+# predict with the SVM classifier
+preds_svm <- predict(results_svm, wine_test[, -10])
+confusionMatrix(preds_svm, wine_test[, 10], positive = "Good")
+# This SVM classifier does not perform particularly well. Maybe we could try with a different kernel function.
+
+
+
+
+
