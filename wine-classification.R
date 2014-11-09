@@ -1,7 +1,10 @@
 
+# clean workspace
+rm(list = ls())
+
 # Data Import -------------------------------------------------------------
 
-wine = read.csv("http://www.nd.edu/~mclark19/learn/data/goodwine.csv")
+wine <- read.csv("http://www.nd.edu/~mclark19/learn/data/goodwine.csv")
 summary(wine)
 
 
@@ -13,6 +16,7 @@ library(caret)     # classification and regression training
 library(e1071)
 library(randomForest)  # for recursive feature elimination
 library(pROC)
+library(nnet)
 
 
 # setup parallel processing on 3 cores ------------------------------------
@@ -76,20 +80,20 @@ plot(results, type = c("g", "o"), main = "Recursive Feature Elimination")
 
 # set the seed, so that the indices will be the same when re-run
 set.seed(1234) 
-trainIndices = createDataPartition(wine$good, p = 0.8, list = FALSE)
+trainIndices <- createDataPartition(wine$good, p = 0.8, list = FALSE)
 
 # The three approaches for feature selection reported different results. Let's stick to the correlation matrix
 # approach (Option 1) and remove the highly correlated features from the training set and the test set
-wanted = !colnames(wine) %in% c("free.sulfur.dioxide", "density", "quality", "color", "white")
-wine_train = wine[trainIndices, wanted]
-wine_test = wine[-trainIndices, wanted]
+wanted <- !colnames(wine) %in% c("free.sulfur.dioxide", "density", "quality", "color", "white")
+wine_train <- wine[trainIndices, wanted]
+wine_test <- wine[-trainIndices, wanted]
 
 
 # Training Set Normalization ----------------------------------------------
 
 # Normalize the continuous variables to the [0,1] range
 normalized_wine_train <- preProcess(wine_train[, -10], method = "range")
-wine_trainplot = predict(normalized_wine_train, wine_train[, -10])
+wine_trainplot <- predict(normalized_wine_train, wine_train[, -10])
 # Let’s take an initial peek at how the predictors separate on the target
 featurePlot(wine_trainplot, wine_train$good, "box")
 
@@ -115,15 +119,14 @@ knn_opts <- data.frame(.k = c(3, 5, 7, 9, 11, 15, 21, 25, 31, 41, 51, 75, 101))
 results_knn <- train(good ~., data = wine_train, method = "knn",
                     preProcess = "range",  # normalization
                     trControl = cv_opts,   # cross validation
-                    tuneGrid = knn_opts)   # grid search
+                    tuneGrid = knn_opts)   # grid search to find the best k
 results_knn
 # In this case it looks like choosing the nearest three neighbors (k = 31) works best in terms of accuracy
 
 # predict with the chosen KNN classifier
-preds_knn = predict(results_knn, newdata = wine_test[, -10])
+preds_knn <- predict(results_knn, newdata = wine_test[, -10])
 # show the classification results in a confusion matrix (aka contingency table) 
 confusionMatrix(preds_knn, wine_test[, 10], positive = "Good")
-# Accuracy 74.96%
 
 # The KNN classifier is robust to outliers, but it is susceptible to irrelevant features
 # and to correlated inputs. Let's plot the relative importance of the features.
@@ -136,17 +139,35 @@ dotPlot(varImp(results_knn, scale = TRUE))
 results_knn3 <- train(good ~., data = wine_train[, c(2, 5, 9, 10)], method = "knn",
                      preProcess = "range",  # normalization
                      trControl = cv_opts,   # cross validation
-                     tuneGrid = knn_opts)   # grid search
+                     tuneGrid = knn_opts)   # grid search to find the best k
 results_knn3
 
 # predict with the refined KNN classifier
-preds_knn3 = predict(results_knn3, newdata = wine_test[, -10])
+preds_knn3 <- predict(results_knn3, newdata = wine_test[, -10])
 # show the classification results in a confusion matrix (aka contingency table) 
 confusionMatrix(preds_knn3, wine_test[, 10], positive = "Good")
-# Accuracy 74.5%
-# The KNN classifiers with only the 3 most important features performs slightly worse than the previuos one
+# The KNN classifier with only the 3 most important features performs slightly better than the previuos one
 
 
 # Neural networks classifier ----------------------------------------------
 
+# Let's try to classify wine with a neural networks classifier
+# Note: the training can be really slow
+results_nnet <- train(good ~., data = wine_train, method = "nnet",
+                      preProcess = "range",  # normalization
+                      trControl = cv_opts,   # cross validation
+                      # we could find the best performing set of parameters with grid search, but it would
+                      # be very time consuming. We could find the best set of:
+                      # .size = number of units in the hidden layer
+                      # .decay = weight decay of the neural network (regularization parameter)
+                      tuneGrid = expand.grid(.size = c(1, 5, 10), .decay = c(0, 0.001, 0.1)),
+                      tuneLength = 5,  # number of levels for each tuning parameters
+                      trace = FALSE,   # switch for tracing optimization. Default TRUE
+                      maxit = 1000)    # maximum number of iterations. Default 100
 
+results_nnet # 75.89%
+
+# predict with the Neural Networks classifier
+preds_nnet <- predict(results_nnet, wine_test[, -10])
+confusionMatrix(preds_nnet, wine_test[, 10], positive = "Good")
+# The Neural Networks classifier performs slightly better than the KNN classifier, but nothing special
