@@ -236,6 +236,24 @@ confusionMatrix(preds_svm, wine_test[, 10], positive = "Good")
 # This SVM classifier does not perform particularly well. Maybe we could try with a different kernel function.
 
 
+# SVM with Radial Basis Function kernel (RBF) -----------------------------
+
+set.seed(1234)
+results_svmRBF <- train(good ~., data = wine_train, method = "svmRadial",
+                        preProcess = "range",  # normalization
+                        trControl = cv_opts,   # cross validation
+                        tuneGrid = expand.grid(.C = c(0.001, 0.01, 0.1, 1, 10, 100, 1000),
+                                               .sigma = c(0.001, 0.01, 0.1)),
+                        tuneLength = 5)
+results_svmRBF
+
+# predict with the SVM-RBF classifier
+preds_svmRBF <- predict(results_svmRBF, wine_test[, -10])
+confusionMatrix(preds_svmRBF, wine_test[, 10], positive = "Good")
+# Neither the SVM-RBF classifier performs particularly well
+
+
+
 
 
 
