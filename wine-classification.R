@@ -266,3 +266,13 @@ results_nb
 preds_nb <- predict(results_nb, wine_test[, -10])
 confusionMatrix(preds_nb, wine_test[, 10], positive = "Good")
 
+
+# Compare the models ------------------------------------------------------
+
+# collect resamples
+models <- resamples(list(KNN = results_knn, NB = results_nb,
+                         NNet = results_nnet, AvgNNet = results_avgNnet,
+                         RF = results_rf, SVM = results_svm, SVM_RBF = results_svmRBF))
+summary(models)
+bwplot(models)
+dotplot(models)
