@@ -1,0 +1,9 @@
+# Ignore R History files
+.Rhistory
+
+# Ignore R Example code in package build process
+*-Ex.R
+# Ignore R data files from past sessions
+.Rdata
+.Rproj.user
+packrat/lib*/
