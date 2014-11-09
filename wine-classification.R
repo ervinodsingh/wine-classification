@@ -12,6 +12,7 @@ library(corrplot)  # graphical display of the correlation matrix
 library(caret)     # classification and regression training
 library(e1071)
 library(randomForest)  # for recursive feature elimination
+library(pROC)
 
 
 # setup parallel processing on 3 cores ------------------------------------
@@ -37,15 +38,18 @@ correlationMatrix <- cor(wine[, -c(12, 13, 14, 15)])  # we can't include quality
 corrplot(correlationMatrix, method = "number", tl.cex = 0.5)
 # if we set a threshold (e.g 0.6), we can see which features are highly correlated
 # (we want to remove "quality", "color", "white" as well)
-highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.6)
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff = 0.6)
 colnames(correlationMatrix)[highlyCorrelated]
 
 # Option 2: feature selection by relative importance
 # This approach produces a different result, and we can have a visual representation
 # of the features according to their relative importance
-control <- trainControl(method="repeatedcv", number=10, repeats=3)
-model <- train(good~., data=wine[, -c(12, 13, 14)], method="glm", preProcess="scale", trControl=control)
-importance <- varImp(model, scale=FALSE)
+control <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+model <- train(good ~., data = wine[, -c(12, 13, 14)], method = "glm",
+               preProcess = "scale",  # normalization
+               trControl = control)   # (repeated) cross validation
+# scale the importance into the 0-100 range
+importance <- varImp(model, scale = TRUE)
 print(importance)
 plot(importance)
 
@@ -54,15 +58,15 @@ plot(importance)
 # According to this approach we should exclude "density" but include "total.sulfur.dioxide"
 # Note: this approach is really slow (~3 minutes with parallel processing, 3 cores)
 # define the control using a random forest selection function
-control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+control <- rfeControl(functions = rfFuncs, method = "cv", number = 10)
 # run the RFE algorithm
-results <- rfe(x = wine[, -c(12, 15)], y = wine$good, sizes=c(1:11), rfeControl=control)
+results <- rfe(x = wine[, -c(12, 15)], y = wine$good, sizes = c(1:11), rfeControl = control)
 print(results)
 # list the chosen features and plot the results
 predictors(results)  # same command as results$optVariables
 # accuracy of the best model (model with the selected features)
 max(results$results$Accuracy) # 0.84469
-plot(results, type=c("g", "o"), main ="Recursive Feature Elimination")
+plot(results, type = c("g", "o"), main = "Recursive Feature Elimination")
 
 
 # Data Partition ----------------------------------------------------------
@@ -84,8 +88,8 @@ wine_test = wine[-trainIndices, wanted]
 # Training Set Normalization ----------------------------------------------
 
 # Normalize the continuous variables to the [0,1] range
-normalized_wine_train <- preProcess(wine_train[,-10], method="range")
-wine_trainplot = predict(normalized_wine_train, wine_train[,-10])
+normalized_wine_train <- preProcess(wine_train[, -10], method = "range")
+wine_trainplot = predict(normalized_wine_train, wine_train[, -10])
 # Let’s take an initial peek at how the predictors separate on the target
 featurePlot(wine_trainplot, wine_train$good, "box")
 
@@ -93,5 +97,56 @@ featurePlot(wine_trainplot, wine_train$good, "box")
 # with regard to good classification. While this might give us some food for thought, note that
 # the figure does not give insight into interaction effects, which methods such as trees will get at.
 
+
+# K-nearest neighbors classifier ------------------------------------------
+
+# Let's try to classify wine with a KNN classifier. But how many neighbors would work best?
+# In order to choose the best number of neighbours, we can perform a 10 fold cross validation.
+# Note: For whatever tuning parameters are sought, the train function will expect a dataframe with a ’.’
+# before the parameter name as the column name.
+
+# train the KNN classifier(s)
+set.seed(1234)
+# setup the cross validation (here a repeated 10-fold cross validation perform slightly better than a
+# 10-fold cross validation)
+cv_opts <- trainControl(method = "repeatedcv", number = 10)
+# train several KNN classifiers (set k as an odd number, in order to avoid ties of the neighbours)
+knn_opts <- data.frame(.k = c(3, 5, 7, 9, 11, 15, 21, 25, 31, 41, 51, 75, 101)) 
+results_knn <- train(good ~., data = wine_train, method = "knn",
+                    preProcess = "range",  # normalization
+                    trControl = cv_opts,   # cross validation
+                    tuneGrid = knn_opts)   # grid search
+results_knn
+# In this case it looks like choosing the nearest three neighbors (k = 31) works best in terms of accuracy
+
+# predict with the chosen KNN classifier
+preds_knn = predict(results_knn, newdata = wine_test[, -10])
+# show the classification results in a confusion matrix (aka contingency table) 
+confusionMatrix(preds_knn, wine_test[, 10], positive = "Good")
+# Accuracy 74.96%
+
+# The KNN classifier is robust to outliers, but it is susceptible to irrelevant features
+# and to correlated inputs. Let's plot the relative importance of the features.
+# Note: this is not the same plot as the one in the Feature Selection section.
+dotPlot(varImp(results_knn, scale = TRUE))
+# It seems that 3 features ("alcohol", "volatile.acidity", "chlorides") are far more important
+# than the other ones.
+
+# Let's try building a new KNN classifier with only the 3 most important features
+results_knn3 <- train(good ~., data = wine_train[, c(2, 5, 9, 10)], method = "knn",
+                     preProcess = "range",  # normalization
+                     trControl = cv_opts,   # cross validation
+                     tuneGrid = knn_opts)   # grid search
+results_knn3
+
+# predict with the refined KNN classifier
+preds_knn3 = predict(results_knn3, newdata = wine_test[, -10])
+# show the classification results in a confusion matrix (aka contingency table) 
+confusionMatrix(preds_knn3, wine_test[, 10], positive = "Good")
+# Accuracy 74.5%
+# The KNN classifiers with only the 3 most important features performs slightly worse than the previuos one
+
+
+# Neural networks classifier ----------------------------------------------
 
 
