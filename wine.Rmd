@@ -1,0 +1,374 @@
+---
+title: "wine"
+author: "Giacomo Debidda"
+date: "Saturday, December 27, 2014"
+output: html_document
+---
+
+I have been practicing machine learning for the last few months. I read many tutorials, watched many videos and [webinars hosted by RStudio](https://github.com/rstudio/webinars), and attended MOOCs like the amazing [Machine Learning from Andrew Ng on Coursera](https://www.coursera.org/course/ml). There is literally a ton of good (and free) stuff out there.
+Recently I came across a [really nice tutorial](http://www3.nd.edu/~mclark19/learn/ML.pdf) to train and compare several classifiers in R with the [caret package](http://topepo.github.io/caret/index.html).
+When you want to try out a particular model in R, you know that probably someone already developed an implementation for that and submitted a package on CRAN. The problem is that the syntax of every modeling function can be different. Caret solves this problem by providing an _interface_ to train and test different models in a unique, consistent way. You still have to install those packages and load them every time you need them. Moreover, caret contains tools for:
+
+* data splitting
+* pre-processing
+* feature selection
+* model tuning using resampling
+* variable importance estimation
+* model comparison
+
+Here I draw inpiration from the aforementioned tutorial, and by using the same dataset I'll train a few more classifiers to see which one has the greatest performance. There are many ways to measure the performance of a classifier: we can look at the confusion matrix (aka contingency table), we can plot the ROC curve, we can calculate the accuracy, etc. Here, we are interested in predicting if a given wine is good or bad, so this problem is a clear example of **binary classification**, and for comparing the classifiers we will use the *accuracy*. Here we are going to evaluate the following 8 classifiers:
+
+1. Naive Bayes (NB)
+2. Logistic regression (GLM)
+3. K Nearest Neighbor (KNN)
+4. Support Vector Machines (SVM)
+5. Support Vector Machines with Radial Basis Function (SVM_RBF)
+6. Neural Networks (NNet)
+7. Neural Networks average (AvgNNet)
+8. Random Forest (RF)
+
+Every classifer can have some parameters to tune, see [here](http://topepo.github.io/caret/modelList.html) to know which ones. In order to find the best set of parameters, caret try all the combinations with a [grid search optimization algorithm](http://en.wikipedia.org/wiki/Hyperparameter_optimization).
+
+### Load the required packages and enable parallel processing
+
+```{r Load Packages, echo=FALSE}
+library(corrplot)  # graphical display of the correlation matrix
+library(caret)     # classification and regression training
+library(klaR)      # naive bayes
+library(nnet)      # neural networks (nnet and avNNet)
+library(kernlab)   # Support Vector Machines (svmLinear and svmRadial)
+library(randomForest)  # Random Forest, also for recursive feature elimination
+
+library(doSNOW)    # parallel processing
+registerDoSNOW(makeCluster(3, type = 'SOCK'))  # all subsequent models are then run in parallel
+# Note: in caret, the functions train, rfe, sbf, bag and avNNet were given an additional argument in their respective control files called allowParallel that defaults to TRUE.
+```
+
+### Load the data
+
+As Hadley Wickham says, data scientists spend roughly 80% of their time dealing with messy data, and they often have to perform some data wrangling in order to prepare the data for the analysis (Hadley writes about these techniques in his paper [tidy data](http://www.jstatsoft.org/v59/i10/paper)).
+The dataset we will analyze here is a modified version of the [Wine Quality](https://archive.ics.uci.edu/ml/datasets/Wine+Quality) UCI Machine Learning dataset. The original wine data were separated into white and red data sets. The author of the original tutorial combined them and created additional variables: color (white or red), and good (indicating scores greater than or equal to 6). So we are going to use this modified version of the wine quality data, not the UCI machine learning one.
+Enough talk, let's load the dataset into R.
+
+Tidy data have three characteristics:
+
+1. Each variable forms a column.
+2. Each observation forms a row.
+3. Each type of observational unit forms a table.
+
+Here we have the data split in 2 files, so we have to combine them.
+Issue with https in knitr. See [here](http://stackoverflow.com/questions/25341285/error-when-knitr-has-to-download-a-zip-file) and [here](http://stackoverflow.com/questions/19890633/r-produces-unsupported-url-scheme-error-when-getting-data-from-https-sites).
+
+```{r Get the datasets from UCI machine learning, echo=FALSE}
+# Note: use http, it does not work with https in knitr (it works from the R console)
+red <- read.csv('http://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv', header = TRUE, sep = ';')
+white <- read.csv('http://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-white.csv', header = TRUE, sep = ';')
+```
+
+```{r merge the 2 datasets, echo=FALSE}
+red[, 'color'] <- 'red'
+white[, 'color'] <- 'white'
+df <- rbind(red, white)
+df$color <- as.factor(df$color)
+```
+
+### Change the type of problem: from regression to binary classification
+
+```{r change to binary classification, echo=FALSE}
+good_ones <- df$quality >= 6
+bad_ones <- df$quality < 6
+df[good_ones, 'quality'] <- 'good'
+df[bad_ones, 'quality'] <- 'bad'  
+df$quality <- as.factor(df$quality)
+```
+
+```{r dummy variables, echo=FALSE}
+dummies <- dummyVars(quality ~ ., data = df)
+df_dummied <- data.frame(predict(dummies, newdata = df))
+df_dummied[, 'quality'] <- df$quality
+```
+
+### Data Partition
+
+Caret has its own partitioning function to split the data into training set and test set. Here we will assign 80% of the observations to the training set, and the remaining 20% to the test set.
+PARLA ANCHE DEL VALIDATION SET.
+
+One technique that might be utilized for larger data sets, is to split the data into training, validation and final test sets. For example, one might take the original data and create something like a 60-20-20% split to create the needed data sets. The purpose of the initial validation set is to select the optimal model and determine the values of tuning parameters. These are parameters which generally deal with how complex a model one will allow, but for which one would have little inkling as to what they should be set at before hand (e.g. our lambda shrinkage parameter). We select models/tuning parameters that minimize the validation set error, and once the model is chosen examine test set error performance. In this way performance assessment is still
+independent of the model development process.
+**quality** is the response variable (a.k.a. output, outcome, target, etc).
+
+```{r split the data, echo=FALSE}
+# set the seed for reproducibility
+set.seed(1234) 
+trainIndices <- createDataPartition(df_dummied$quality, p = 0.8, list = FALSE)
+train <- df_dummied[trainIndices, ]
+test <- df_dummied[-trainIndices, ]
+```
+
+### Feature selection
+
+This dataset is composed by 6497 observations (rows) and 15 variables (columns). When we build a model, we want to include only the relevant features. We don't want to include highly correlated features in our models.
+
+Since we definied a new variable, "good", if the wine quality>=6, we know that these 2 variables are correlated, so we don't want to include "quality" in our models.
+
+There are several ways to perform a feature selection:
+
+* take a look at the correlation matrix
+* evaluate the relative importance of the features
+* do a backwards selection (aka recursive feature elimination)
+* do a forward selection
+and so on...
+
+**Option 1: feature selection by looking at the correlation matrix**
+Since we want to avoid collinearity in the data, we can take a look at correlation matrix. We can't include "quality" because it is the response variable. And we cannot include "color" because is a factor variable.
+
+```{r correlation matrix, echo=FALSE}
+numericColumns <- !colnames(train) %in% c('quality', 'color.red', 'color.white')
+correlationMatrix <- cor(train[, numericColumns])
+corrplot(correlationMatrix, method = 'number', tl.cex = 0.5)
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff = 0.6)
+colnames(correlationMatrix)[highlyCorrelated]
+```
+
+IMMAGINE_1 corrplot
+
+If we set a threshold (e.g. 0.6), we can see which features are highly correlated. By looking at the correlation matrix we would conclude that "total.sulfur.dioxide" and "density" are linearly correlated with other variables, and therefore we would not include them in any classifier.
+
+**Option 2: feature selection by relative importance**
+Mi sa che le variabili hanno una importanza diversa a seconda del modello, quindi non ha molto senso.
+This approach produces a different result, and we can have a visual representation of the features according to their relative importance. The variable importance evaluation can be done on a model with the function *varImp* from the caret package.
+
+In a **repeated K-fold cross validation** we have to decide the number of folds (K) and the number of separate repetions. The function trainControl in the caret package is a very convenient way to set the resampling scheme we need.
+The preProcess option 'scale' scales the data to be within the interval [0, 1].
+Repeat 3 times a 10-fold cross validation.
+
+```{r feature selection by relative importance, echo=FALSE}
+
+# mi sa e' concettualmente sbagliato farlo qua. Va fatto per ogni modello
+
+# fitControl <- trainControl(method = 'cv', number = 10)
+# fit_glm <- train(quality ~., data = train,
+#                  method = 'glm',
+#                  preProcess = 'scale', # scale the data to be within the interval [0, 1]
+#                  trControl = fitControl)
+# # scale the importance into the 0-100 range
+# importance <- varImp(fit_glm, scale = TRUE)
+# print(importance)
+# plot(importance)
+```
+
+IMMAGINE_2 feature importance (stemplot)
+
+**Option 3: feature selection by recursive feature elimination (aka backward elimination)**
+We cannot include in our classifiers the variables "quality" and "good" (response variable).
+With this approach we can see how the accuracy of the classifier changes by including more features. According to this approach we should exclude "density" but include "total.sulfur.dioxide".
+Note: this approach is really slow (~3 minutes with parallel processing, 3 cores).
+See the documentatio on the [caret website](http://topepo.github.io/caret/featureselection.html).
+Read also [here](http://www.brainvoyager.com/bvqx/doc/UsersGuide/MVPA/RecursiveFeatureElimination.html) and [here](http://stats.stackexchange.com/questions/103810/find-variables-selected-for-each-subset-using-caret-feature-selection).
+
+```{r RFE with Random Forest, echo=FALSE, cache=TRUE}
+# Note: very slow
+fitControl_rfe <- rfeControl(functions = rfFuncs, method = 'cv', number = 5)
+fit_rfe <- rfe(quality ~., data = train,
+               sizes = c(1:10),  # subset sizes to test (non capisco come funziona)
+               rfeControl = fitControl_rfe)
+predictors(fit_rfe)  # same command as fit_rfe$optVariables
+max(fit_rfe$results$Accuracy)
+plot(fit_rfe, type = c('g', 'o'), main = 'Recursive Feature Elimination')
+```
+
+IMMAGINE_3 recursive feature elimination
+
+### Exploratory Data Analysis
+
+Vedi altre opzioni per featurePlot.
+Vedi cosa cambia fra range e scale.
+
+```{r exploratory data analysis, echo=FALSE}
+# Normalize the quantitative variables to be within the [0,1] range
+train_normalized <- preProcess(train[, numericColumns], method = 'range')
+train_plot <- predict(train_normalized, train[, numericColumns])
+# Let'€™s take an initial peek at how the predictors separate on the target
+featurePlot(train_plot, train$quality, 'box')
+```
+
+IMMAGINE_4 featurePlot
+
+For the training set, it looks like *alcohol* content, *volatile.acidity* and *chlorides* separate most with regard to good classification. While this might give us some hints, the figure does not provide us any suggestions about interaction effects which may occur between the variables.
+
+### Set the Cross Validation
+
+```{r cross validation}
+# fitControl <- trainControl(method = 'repeatedcv', number = 5, repeats = 3)  # very slow
+fitControl <- trainControl(method = 'cv', number = 5)
+```
+
+Ok, now that we have a standard way to evaluate all our classifier, let's start with the simplest models.
+In the machine learning field of study, following the Occam's razor means means selecting the simplest models, the ones with the fewest assumptions. There are hundreds of models, but we will start from a simple one.
+
+### Other resources
+
+list:
+
+* [preprocess factors](http://stackoverflow.com/questions/14023423/how-to-preprocess-features-when-some-of-them-are-factors)
+* [K-fold CV. How many times](http://stats.stackexchange.com/questions/82546/how-many-times-should-we-repeat-a-k-fold-cv)
+* [bootstrap or CV for prediction error](http://stats.stackexchange.com/questions/18348/differences-between-cross-validation-and-bootstrapping-to-estimate-the-predictio)
+* [set seed for reproducibility](http://stackoverflow.com/questions/13403427/fully-reproducible-parallel-models-using-caret)
+
+end list.
+
+### Naive Bayes classifier (NB) rivedi bene!
+
+More resource [here](http://joshwalters.com/2012/11/27/naive-bayes-classification-in-r.html)
+
+```{r Naive Bayes}
+features <- predictors(fit_rfe)
+# Here the Naive Bayes classifier works best without range
+fit_nb <- train(x = train[, features], y = train$quality,
+                method ='nb',
+                trControl = fitControl)
+predict_nb <- predict(fit_nb, newdata = test[, features])
+confusionMatrix(predict_nb, test$quality, positive = 'good')
+
+importance <- varImp(fit_nb, scale = TRUE)
+print(importance)
+plot(importance, main = 'Feature importance for Naive Bayes')
+```
+
+### K Nearest Neighbors (KNN)
+
+```{r KNN, echo=FALSE}
+# tunable parameter: k = number of neighbours (set k as an odd number to avoid ties)
+fit_knn <- train(x = train[, features], y = train$quality,
+                 method = 'knn',
+                 preProcess = 'range', 
+                 trControl = fitControl, 
+                 tuneGrid = expand.grid(.k = c(3, 5, 7, 9, 11, 15, 21, 25, 31, 41, 51, 75, 101)))  
+predict_knn <- predict(fit_knn, newdata = test[, features])
+confusionMatrix(predict_knn, test$quality, positive = 'good')
+```
+
+### Logistic Regression (GLM)
+
+```{r Logistic Regression, echo=FALSE}
+# no tunable parameters
+fit_glm <- train(x = train[, features], y = train$quality,
+                 method = 'glm',
+                 preProcess = 'range', # it shows the same result with or without 'range'
+                 trControl = fitControl) 
+predict_glm <- predict(fit_glm, newdata = test[, features])
+confusionMatrix(predict_glm, test$quality, positive = 'good')
+```
+
+### Support Vector Machines with linear kernel (svmLinear)
+
+```{r SVM Linear, echo=FALSE, cache=TRUE}
+# tunable parameter: C = regularization parameter which sets the decision boundary
+# In svmLinear we cannot tune sigma
+# Note: the training is very slow
+fit_svm <- train(x = train[, features], y = train$quality,
+                 method = 'svmLinear',
+                 preProcess = 'range',
+                 trControl = fitControl,
+                 tuneGrid = expand.grid(.C = c(0.001, 0.01, 0.1, 1, 10, 100, 1000)))
+predict_svm <- predict(fit_svm, newdata = test[, features])
+confusionMatrix(predict_svm, test$quality, positive = 'good')
+```
+
+The SVM classifier with linear kernel does not perform particularly well. Maybe we could try with a different kernel function. A very popular choice is the Radial Basis kernel function (RBF).
+
+### Support Vector Machines with Radial Basis Function (svmRBF)
+
+```{r SVM RBS, echo=FALSE, cache=TRUE}
+# tunable parameter: C = regularization parameter which sets the decision boundary; sigma = kernel.
+# Note: the training is very slow                                         
+fit_svmRBF <- train(x = train[, features], y = train$quality,
+                    method = 'svmRadial',
+                    preProcess = 'range',
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(.C = c(0.001, 0.01, 0.1, 1, 10, 100, 1000),
+                                           .sigma = c(0.001, 0.01, 0.1)))
+predict_svmRBF <- predict(fit_svmRBF, newdata = test[, features])
+confusionMatrix(predict_svmRBF, test$quality, positive = 'good')
+```
+
+Neither the SVM-RBF classifier performs particularly well.
+
+### Neural Networks (NNet)
+
+```{r Neural Networks, echo=FALSE, cache=TRUE}
+# tunable parameters: size = number of units in the hidden layer; decay = weight decay of the neural network (regularization parameter)
+# Note: the training is very slow
+fit_nnet <- train(x = train[, features], y = train$quality,
+                  method = 'nnet',
+                  preProcess = 'range',
+                  trControl = fitControl,
+                  tuneGrid = expand.grid(.size = c(1, 5, 10),
+                                         .decay = c(0, 0.001, 0.1)),
+                  trace = FALSE,  # switch for tracing optimization. Default TRUE
+                  maxit = 1000)   # maximum number of iterations. Default 100
+predict_nnet <- predict(fit_nnet, newdata = test[, features], type = 'raw')
+confusionMatrix(predict_nnet, test$quality, positive = 'good')
+```
+
+The Neural Networks classifier performs slightly better than the KNN classifier, but nothing spectacular. And it is really slow to train.
+
+### Neural Networks average (AvNNet)
+
+The avNNet method in the caret package train several neural networks classifiers, aggregate them and average them. It is an ensemble method.
+
+```{r AvNNet, echo=FALSE, cache=TRUE}
+# tunable parameters: size = number of units in the hidden layer; decay = weight decay of the neural network (regularization parameter); bag = a logical for bagging for each repeat.
+# Note: the training is very slow
+fit_avNnet <- train(x = train[, features], y = train$quality,
+                    method = 'avNNet',
+                    preProcess = 'range',
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(.size = c(1, 5, 10),
+                                           .decay = c(0, 0.001, 0.1),
+                                           .bag = FALSE),
+                    trace = FALSE,
+                    maxit = 1000)
+predict_avNnet <- predict(fit_avNnet, newdata = test[, features])
+confusionMatrix(predict_avNnet, test$quality, positive = 'good')
+```
+
+The Model Averaged Neural Networks classifier performs slightly better than the single Neural Networks.
+
+### Random Forest (RF)
+
+```{r Random Forest, echo=FALSE, cache=TRUE}
+# tunable parameter: mtry (number of variables randomly sampled as candidates at each split)
+fit_rf <- train(x = train[, features], y = train$quality,
+                 method = 'rf',
+                 # preProcess = 'range', # it seems slightly better without 'range' 81.82% vs 81.28%
+                 trControl = fitControl,
+                tuneGrid = expand.grid(.mtry = c(2:6)),
+                n.tree = 1000) 
+predict_rf <- predict(fit_rf, newdata = test[, features])
+confusionMatrix(predict_rf, test$quality, positive = 'good')
+
+importance <- varImp(fit_rf, scale = TRUE)
+print(importance)
+plot(importance, main = 'Feature importance for Random Forest')
+```
+
+The Random Forest classifier performs quite better than the Model Averaged Neural Networks, and it is significantly faster to train. Random forest classifier does not suffer of irrelevant and/or correlated predictors, and since it is an ensemble method, it contains the combined information of many models, so it is lesser prone to overfitting.
+
+**Note:** As Jeremy Howard says [here](https://www.youtube.com/watch?v=kwt6XEh7U3g#t=47m22s), you should **never** prune trees in a Random Forests classifier.
+
+### Compare the models
+
+Spiega cosa e' il kappa. Discuti sui vari modelli.
+
+```{r compare models, echo=FALSE}
+models <- resamples(list(NB = fit_nb, KNN = fit_knn, GLM = fit_glm,
+                         SVM = fit_svm,
+                         SVM_RBF = fit_svmRBF,
+                         NNet = fit_nnet, AvgNNet = fit_avNnet,
+                         RF = fit_rf))
+summary(models)
+bwplot(models)
+dotplot(models)
+```
+
