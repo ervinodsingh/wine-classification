@@ -4,6 +4,7 @@ corrplot
 doSNOW
 foreach
 ggplot2
+gridExtra
 iterators
 kernlab
 klaR

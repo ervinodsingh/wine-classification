@@ -38,10 +38,13 @@ library(klaR)      # naive bayes
 library(nnet)      # neural networks (nnet and avNNet)
 library(kernlab)   # support vector machines (svmLinear and svmRadial)
 library(randomForest)  # random forest, also for recursive feature elimination
+library(gridExtra) # save dataframes as images
 
 library(doSNOW)    # parallel processing
 registerDoSNOW(makeCluster(3, type = 'SOCK')) 
 # Note: in caret, the functions train, rfe, sbf, bag and avNNet were given an additional argument in their respective control files called allowParallel that defaults to TRUE.
+
+today <- as.character(Sys.Date())
 ```
 
 ### Load the data
@@ -114,9 +117,12 @@ Since we want to avoid collinearity in the data, we can take a look at correlati
 ```{r correlation matrix, echo=FALSE}
 numericColumns <- !colnames(train) %in% c('quality', 'color.red', 'color.white')
 correlationMatrix <- cor(train[, numericColumns])
-corrplot(correlationMatrix, method = 'number', tl.cex = 0.5)
 highlyCorrelated <- findCorrelation(correlationMatrix, cutoff = 0.6)
 colnames(correlationMatrix)[highlyCorrelated]
+
+png(paste0(today, '-', 'correlation-matrix.png'))
+corrplot(correlationMatrix, method = 'number', tl.cex = 0.5)
+dev.off()
 ```
 
 If we set a threshold (e.g. 0.6), we can see which features are highly correlated. By looking at the correlation matrix we can conclude that `{r total.sulfur.dioxide}` and `{r density}` are linearly correlated with other variables, and therefore we are not going not include them in any classifier.
@@ -132,10 +138,12 @@ fitControl_rfe <- rfeControl(functions = rfFuncs, method = 'cv', number = 5) # 5
 fit_rfe <- rfe(quality ~., data = train,
                sizes = c(1:10),  # subset sizes to test (ahem... not sure how it works)
                rfeControl = fitControl_rfe)
-predictors(fit_rfe)  # same command as fit_rfe$optVariables
-features <- predictors(fit_rfe)
+features <- predictors(fit_rfe) # same command as fit_rfe$optVariables
 max(fit_rfe$results$Accuracy)
+
+png(paste0(today, '-', 'recursive-feature-elimination.png'))
 plot(fit_rfe, type = c('g', 'o'), main = 'Recursive Feature Elimination')
+dev.off()
 ```
 
 ### Exploratory Data Analysis
@@ -146,8 +154,11 @@ Let's see how the variables are distributed.
 # Normalize the quantitative variables to be within the [0,1] range
 train_normalized <- preProcess(train[, numericColumns], method = 'range')
 train_plot <- predict(train_normalized, train[, numericColumns])
+
 # Let'€™s take an initial peek at how the predictors separate on the target
+png(paste0(today, '-', 'feature-plot.png'))
 featurePlot(train_plot, train$quality, 'box')
+dev.off()
 ```
 
 Note: using the **preProcess** function when some variables are factors is a bit tricky. See [how to preprocess factors](http://stackoverflow.com/questions/14023423/how-to-preprocess-features-when-some-of-them-are-factors).
@@ -173,11 +184,12 @@ fit_nb <- train(x = train[, features], y = train$quality,
                 method ='nb',
                 trControl = fitControl)
 predict_nb <- predict(fit_nb, newdata = test[, features])
-confusionMatrix(predict_nb, test$quality, positive = 'good')
+confMat_nb <- confusionMatrix(predict_nb, test$quality, positive = 'good')
+importance_nb <- varImp(fit_nb, scale = TRUE)
 
-importance <- varImp(fit_nb, scale = TRUE)
-print(importance)
-plot(importance, main = 'Feature importance for Naive Bayes')
+png(paste0(today, '-', 'importance-nb.png'))
+plot(importance_nb, main = 'Feature importance for Naive Bayes')
+dev.off()
 ```
 
 More resources for Naive Bayes classifiers in R [here](http://joshwalters.com/2012/11/27/naive-bayes-classification-in-r.html).
@@ -192,7 +204,12 @@ fit_knn <- train(x = train[, features], y = train$quality,
                  trControl = fitControl, 
                  tuneGrid = expand.grid(.k = c(3, 5, 7, 9, 11, 15, 21, 25, 31, 41, 51, 75, 101)))  
 predict_knn <- predict(fit_knn, newdata = test[, features])
-confusionMatrix(predict_knn, test$quality, positive = 'good')
+confMat_knn <- confusionMatrix(predict_knn, test$quality, positive = 'good')
+importance_knn <- varImp(fit_knn, scale = TRUE)
+
+png(paste0(today, '-', 'importance-knn.png'))
+plot(importance_knn, main = 'Feature importance for K Nearest Neighbors')
+dev.off()
 ```
 
 ### Logistic Regression (GLM)
@@ -204,7 +221,12 @@ fit_glm <- train(x = train[, features], y = train$quality,
                  preProcess = 'range', # it shows the same result with or without 'range'
                  trControl = fitControl) 
 predict_glm <- predict(fit_glm, newdata = test[, features])
-confusionMatrix(predict_glm, test$quality, positive = 'good')
+confMat_glm <- confusionMatrix(predict_glm, test$quality, positive = 'good')
+importance_glm <- varImp(fit_glm, scale = TRUE)
+
+png(paste0(today, '-', 'importance-glm.png'))
+plot(importance_glm, main = 'Feature importance for Logistic Regression')
+dev.off()
 ```
 
 ### Support Vector Machines with linear kernel (svmLinear)
@@ -219,7 +241,12 @@ fit_svm <- train(x = train[, features], y = train$quality,
                  trControl = fitControl,
                  tuneGrid = expand.grid(.C = c(0.001, 0.01, 0.1, 1, 10, 100, 1000)))
 predict_svm <- predict(fit_svm, newdata = test[, features])
-confusionMatrix(predict_svm, test$quality, positive = 'good')
+confMat_svm <- confusionMatrix(predict_svm, test$quality, positive = 'good')
+importance_svm <- varImp(fit_svm, scale = TRUE)
+
+png(paste0(today, '-', 'importance-svm.png'))
+plot(importance_svm, main = 'Feature importance for SVM-Linear')
+dev.off()
 ```
 
 The accuracy isn't great. Maybe we could try with a different kernel function. A very popular choice is the Radial Basis kernel function (RBF).
@@ -227,7 +254,9 @@ The accuracy isn't great. Maybe we could try with a different kernel function. A
 ### Support Vector Machines with Radial Basis Function (svmRBF)
 
 ```{r SVM RBS, cache=TRUE}
-# tunable parameter: C = regularization parameter which sets the decision boundary; sigma = kernel.
+# tunable parameter:
+# C = regularization parameter which sets the decision boundary;
+# sigma = kernel.
 # Note: the training is very slow                                         
 fit_svmRBF <- train(x = train[, features], y = train$quality,
                     method = 'svmRadial',
@@ -236,7 +265,12 @@ fit_svmRBF <- train(x = train[, features], y = train$quality,
                     tuneGrid = expand.grid(.C = c(0.001, 0.01, 0.1, 1, 10, 100, 1000),
                                            .sigma = c(0.001, 0.01, 0.1)))
 predict_svmRBF <- predict(fit_svmRBF, newdata = test[, features])
-confusionMatrix(predict_svmRBF, test$quality, positive = 'good')
+confMat_svmRBF <- confusionMatrix(predict_svmRBF, test$quality, positive = 'good')
+importance_svmRBF <- varImp(fit_svmRBF, scale = TRUE)
+
+png(paste0(today, '-', 'importance-svmRBF.png'))
+plot(importance_svmRBF, main = 'Feature importance for SVM-RBF')
+dev.off()
 ```
 
 The SVM with linear kernel does not perform particularly well, neither does the SVM-RBF classifier.
@@ -244,7 +278,9 @@ The SVM with linear kernel does not perform particularly well, neither does the 
 ### Neural Networks (NNet)
 
 ```{r Neural Networks, cache=TRUE}
-# tunable parameters: size = number of units in the hidden layer; decay = weight decay of the neural network (regularization parameter)
+# tunable parameters:
+# size = number of units in the hidden layer;
+# decay = weight decay of the neural network (regularization parameter)
 # Note: the training is very slow
 fit_nnet <- train(x = train[, features], y = train$quality,
                   method = 'nnet',
@@ -255,7 +291,12 @@ fit_nnet <- train(x = train[, features], y = train$quality,
                   trace = FALSE,  # switch for tracing optimization. Default TRUE
                   maxit = 1000)   # maximum number of iterations. Default 100
 predict_nnet <- predict(fit_nnet, newdata = test[, features], type = 'raw')
-confusionMatrix(predict_nnet, test$quality, positive = 'good')
+confMat_nnet <- confusionMatrix(predict_nnet, test$quality, positive = 'good')
+importance_nnet <- varImp(fit_nnet, scale = TRUE)
+
+png(paste0(today, '-', 'importance-nnet.png'))
+plot(importance_nnet, main = 'Feature importance for NNet')
+dev.off()
 ```
 
 The Neural Networks classifier performs slightly better than the KNN classifier, but nothing spectacular. And it is really slow to train.
@@ -265,7 +306,10 @@ The Neural Networks classifier performs slightly better than the KNN classifier,
 The avNNet method in the caret package train several neural networks classifiers, aggregate them and average them. It is an ensemble method.
 
 ```{r AvNNet, cache=TRUE}
-# tunable parameters: size = number of units in the hidden layer; decay = weight decay of the neural network (regularization parameter); bag = a logical for bagging for each repeat.
+# tunable parameters:
+# size = number of units in the hidden layer;
+# decay = weight decay of the neural network (regularization parameter);
+# bag = a logical for bagging for each repeat.
 # Note: the training is very slow
 fit_avNnet <- train(x = train[, features], y = train$quality,
                     method = 'avNNet',
@@ -277,7 +321,12 @@ fit_avNnet <- train(x = train[, features], y = train$quality,
                     trace = FALSE,
                     maxit = 1000)
 predict_avNnet <- predict(fit_avNnet, newdata = test[, features])
-confusionMatrix(predict_avNnet, test$quality, positive = 'good')
+confMat_avNnet <- confusionMatrix(predict_avNnet, test$quality, positive = 'good')
+importance_avNnet <- varImp(fit_avNnet, scale = TRUE)
+
+png(paste0(today, '-', 'importance-avNnet.png'))
+plot(importance_avNnet, main = 'Feature importance for avNnet')
+dev.off()
 ```
 
 The Model Averaged Neural Networks classifier performs slightly better than the single Neural Networks.
@@ -288,16 +337,17 @@ The Model Averaged Neural Networks classifier performs slightly better than the 
 # tunable parameter: mtry (number of variables randomly sampled as candidates at each split)
 fit_rf <- train(x = train[, features], y = train$quality,
                  method = 'rf',
-                 # preProcess = 'range', # it seems slightly better without 'range' 81.82% vs 81.28%
+                 # preProcess = 'range', # it seems slightly better without 'range'
                  trControl = fitControl,
                 tuneGrid = expand.grid(.mtry = c(2:6)),
                 n.tree = 1000) 
 predict_rf <- predict(fit_rf, newdata = test[, features])
-confusionMatrix(predict_rf, test$quality, positive = 'good')
+confMat_rf <- confusionMatrix(predict_rf, test$quality, positive = 'good')
+importance_rf <- varImp(fit_rf, scale = TRUE)
 
-importance <- varImp(fit_rf, scale = TRUE)
-print(importance)
-plot(importance, main = 'Feature importance for Random Forest')
+png(paste0(today, '-', 'importance-rf.png'))
+plot(importance_rf, main = 'Feature importance for Random Forest')
+dev.off()
 ```
 
 The Random Forest classifier performs quite better than the Model Averaged Neural Networks, and it is significantly faster to train. A random forest classifier does not suffer of irrelevant and/or correlated predictors, and since it is an ensemble method, it contains the combined information of many models, so it is lesser prone to overfitting.  
@@ -311,9 +361,17 @@ models <- resamples(list(NB = fit_nb, KNN = fit_knn, GLM = fit_glm,
                          SVM_RBF = fit_svmRBF,
                          NNet = fit_nnet, AvgNNet = fit_avNnet,
                          RF = fit_rf))
-summary(models)
-bwplot(models)
+png(paste0(today, '-', 'compare-models.png'))
 dotplot(models)
+dev.off()
+
+results <- summary(models)
+png(paste0(today, '-', 'models-accuracy.png'), width = 480, height = 240)
+grid.table(results$statistics$Accuracy)
+dev.off()
+png(paste0(today, '-', 'models-kappa.png'), width = 480, height = 240)
+grid.table(results$statistics$Kappa)
+dev.off()
 ```
 
 ### A note on reproducibility
